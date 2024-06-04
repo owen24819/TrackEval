@@ -1,4 +1,4 @@
-Cell-HOTA is an extention of HOTA. It is designed to handle cell divisions with all the benefits of HOTA. Althouhg TrackEval has many metrics, the code was modified only to support the HOTA metric for cell tracking. All other metrics in TrackEval were not modified. This README.md was modified from the original TrackEval github.
+Cell-HOTA is an extention of HOTA. It is designed to handle cell divisions with all the benefits of HOTA. Althouhgh TrackEval has many metrics, the code was modified only to support the HOTA metric for cell tracking. All other metrics in TrackEval were not modified. This README.md was modified from the original TrackEval github.
 
 HOTA was developed by Luiten et al. (*[HOTA: A Higher Order Metric for Evaluating Multi-Object Tracking](https://link.springer.com/article/10.1007/s11263-020-01375-2). IJCV 2020. Jonathon Luiten, Aljosa Osep, Patrick Dendorfer, Philip Torr, Andreas Geiger, Laura Leal-Taixe and Bastian Leibe.*)
 
