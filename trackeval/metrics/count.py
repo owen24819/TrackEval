@@ -7,7 +7,7 @@ class Count(_BaseMetric):
     """Class which simply counts the number of tracker and gt detections and ids."""
     def __init__(self, config=None):
         super().__init__()
-        self.integer_fields = ['Dets', 'GT_Dets', 'IDs', 'GT_IDs']
+        self.integer_fields = ['Dets', 'GT_Dets', 'IDs', 'GT_IDs','FP_pixel_counts','FN_pixel_counts','Frames']
         self.fields = self.integer_fields
         self.summary_fields = self.fields
 
@@ -19,6 +19,8 @@ class Count(_BaseMetric):
                'GT_Dets': data['num_gt_dets'],
                'IDs': data['num_tracker_ids'],
                'GT_IDs': data['num_gt_ids'],
+               'FP_pixel_counts': data['FP_pixel_counts'],
+               'FN_pixel_counts': data['FN_pixel_counts'],
                'Frames': data['num_timesteps']}
         return res
 

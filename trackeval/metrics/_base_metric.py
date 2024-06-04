@@ -17,6 +17,7 @@ class _BaseMetric(ABC):
         self.fields = []
         self.summary_fields = []
         self.registered = False
+        self.error_fields = []
 
     #####################################################################
     # Abstract functions for subclasses to implement

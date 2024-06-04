@@ -3,7 +3,11 @@ import os
 import csv
 import argparse
 from collections import OrderedDict
-
+from tqdm import tqdm
+import cv2
+import re
+import numpy as np
+from pycocotools import mask as m
 
 def init_config(config, default_config, name=None):
     """Initialise non-given config values with defaults"""
@@ -74,7 +78,7 @@ def validate_metrics_list(metrics_list):
     return metric_names
 
 
-def write_summary_results(summaries, cls, output_folder):
+def write_summary_results(summaries, cls, output_folder, flex_div, count_edges):
     """Write summary results to file"""
 
     fields = sum([list(s.keys()) for s in summaries], [])
@@ -97,7 +101,10 @@ def write_summary_results(summaries, cls, output_folder):
     fields = list(default_ordered_dict.keys())
     values = list(default_ordered_dict.values())
 
-    out_file = os.path.join(output_folder, cls + '_summary.txt')
+    flex_div = '_flex_div' if flex_div else ''
+    edges = '' if count_edges else '_no_edges'
+
+    out_file = os.path.join(output_folder, (cls + '_summary' + flex_div + edges + '.txt'))
     os.makedirs(os.path.dirname(out_file), exist_ok=True)
     with open(out_file, 'w', newline='') as f:
         writer = csv.writer(f, delimiter=' ')
@@ -105,11 +112,14 @@ def write_summary_results(summaries, cls, output_folder):
         writer.writerow(values)
 
 
-def write_detailed_results(details, cls, output_folder):
+def write_detailed_results(details, cls, output_folder, flex_div, count_edges):
     """Write detailed results to file"""
     sequences = details[0].keys()
     fields = ['seq'] + sum([list(s['COMBINED_SEQ'].keys()) for s in details], [])
-    out_file = os.path.join(output_folder, cls + '_detailed.csv')
+    flex_div = '_flex_div' if flex_div else ''
+    edges = '' if count_edges else '_no_edges'
+
+    out_file = os.path.join(output_folder, cls + '_detailed' + flex_div + edges + '.csv')
     os.makedirs(os.path.dirname(out_file), exist_ok=True)
     with open(out_file, 'w', newline='') as f:
         writer = csv.writer(f)
@@ -144,3 +154,93 @@ def load_detail(file):
 class TrackEvalException(Exception):
     """Custom exception for catching expected errors."""
     ...
+
+
+def convert_CTC_to_MOTS(hotapath,ctcpath):
+
+    data_format = 'MOTS' # ['MOT','MOTS']
+    hotapath.mkdir(exist_ok=True)
+
+    ctc_folders = sorted([x for x in ctcpath.iterdir() if x.is_dir() and re.findall('\d\d$',x.name)])
+                
+    for ctc_folder in ctc_folders:
+        
+        if (ctc_folder.parent / (ctc_folder.name + '_GT')).exists():
+            fps = sorted((ctc_folder.parent / (ctc_folder.name + '_GT') / 'TRA').glob('*.tif'))
+            man_track_path = ctc_folder.parent / (ctc_folder.name + '_GT') / 'TRA' / 'man_track.txt'
+
+            (hotapath / ctc_folder.name).mkdir(exist_ok=True)
+            (hotapath / ctc_folder.name / 'gt').mkdir(exist_ok=True)
+
+            if (hotapath / ctc_folder.name / 'gt' / 'gt.txt').exists():
+                (hotapath / ctc_folder.name / 'gt' / 'gt.txt').unlink()
+
+        else:
+            fps = sorted(ctc_folder.glob('*.tif'))
+            man_track_path = ctc_folder / 'res_track.txt'
+
+            hotapath.mkdir(exist_ok=True)
+            if (hotapath / f'{ctc_folder.name}.txt').exists():
+                (hotapath / f'{ctc_folder.name}.txt').unlink()
+
+        with open(man_track_path) as f:
+            track_file = []
+            for line in f:
+                line = line.split() # to deal with blank 
+                if line:            # lines (ie skip them)
+                    line = [int(i) for i in line]
+                    track_file.append(line)
+            track_file = np.stack(track_file)
+
+        all_cellnbs = set()
+
+        # Get all cell numbers using in the CTC
+        # To be compatible for HOTA, we need all cellnbs to be 1-X. It can't skip numbers
+        for fp in fps:
+            gt = cv2.imread(str(fp),cv2.IMREAD_ANYDEPTH)
+            cellnbs = np.unique(gt)
+            all_cellnbs.update(set(cellnbs))
+
+        missing_cellnbs = [cellnb for cellnb in range(1,max(list(all_cellnbs))+1) if cellnb not in all_cellnbs]
+        
+        for counter,fp in enumerate(tqdm(fps)):
+
+            gt = cv2.imread(str(fp),cv2.IMREAD_ANYDEPTH)
+
+            cellnbs = np.unique(gt)
+            cellnbs = cellnbs[cellnbs != 0]
+
+            framenb = int(re.findall('\d+',fp.name)[-1])
+        
+            # If no cell is present in image, we skip it
+            if len(cellnbs) == 0:
+                continue
+
+            for cellnb in cellnbs:
+
+                buffer = sum(1 for missing_cellnb in missing_cellnbs if missing_cellnb < cellnb)
+
+                mask = gt == cellnb
+                parent = track_file[track_file[:,0]==cellnb,-1][0] if track_file[track_file[:,0]==cellnb,1] == framenb and track_file[track_file[:,0]==cellnb,-1] > 0 else 0
+                parent_buffer = sum(1 for missing_cellnb in missing_cellnbs if missing_cellnb < parent)
+
+                if data_format == 'MOTS':
+                    rle = m.encode(np.asfortranarray(mask))['counts'].decode("utf-8")
+                    line = f'{counter+1} {cellnb-buffer} {1} {gt.shape[0]} {gt.shape[1]} {rle} {parent-parent_buffer}'
+
+                elif data_format == 'MOT':
+                    y, x = np.where(mask != 0)
+                    width = (np.max(x) - np.min(x) ) 
+                    height = (np.max(y) - np.min(y)) 
+                    bbox = (np.min(x) ,np.min(y),width,height)
+                    line = f'{counter+1} {cellnb-buffer} {bbox[0]} {bbox[1]} {bbox[2]} {bbox[3]} {bbox[4]} -1 -1 -1 -1 {parent-parent_buffer}'
+                else:
+                    raise NotImplementedError
+
+                if (ctc_folder.parent / (ctc_folder.name + '_GT')).exists():
+                    with open(hotapath / ctc_folder.name / 'gt' / 'gt.txt', 'a') as file:
+                        file.write(line + '\n')
+                else:
+                    with open(hotapath / f'{ctc_folder.name}.txt', 'a') as file:
+                        file.write(line + '\n')
+

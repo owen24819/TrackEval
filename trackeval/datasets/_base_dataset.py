@@ -64,7 +64,7 @@ class _BaseDataset(ABC):
         return self.tracker_list, self.seq_list, self.class_list
 
     @_timing.time
-    def get_raw_seq_data(self, tracker, seq):
+    def get_raw_seq_data(self, tracker, seq, dataset_type, count_edges):
         """ Loads raw data (tracker and ground-truth) for a single tracker on a single sequence.
         Raw data includes all of the information needed for both preprocessing and evaluation, for all classes.
         A later function (get_processed_seq_data) will perform such preprocessing and extract relevant information for
@@ -89,16 +89,52 @@ class _BaseDataset(ABC):
         calculation of metrics such as class confusion matrices. Typically the impact of this on performance is low.
         """
         # Load raw data.
+        from pycocotools import mask as mask_utils
+
         raw_gt_data = self._load_raw_file(tracker, seq, is_gt=True)
         raw_tracker_data = self._load_raw_file(tracker, seq, is_gt=False)
         raw_data = {**raw_tracker_data, **raw_gt_data}  # Merges dictionaries
 
         # Calculate similarities for each timestep.
         similarity_scores = []
+        edges_gt_list = []
+        edges_tracker_list = []
         for t, (gt_dets_t, tracker_dets_t) in enumerate(zip(raw_data['gt_dets'], raw_data['tracker_dets'])):
             ious = self._calculate_similarities(gt_dets_t, tracker_dets_t)
             similarity_scores.append(ious)
+            
+            height, width = gt_dets_t[0]['size']
+
+            edges_gt = np.zeros(len(gt_dets_t)).astype(bool)
+            edges_tracker = np.zeros(len(tracker_dets_t)).astype(bool)
+
+            if not count_edges:
+
+                gt_dets_t_masks = mask_utils.decode(gt_dets_t).transpose(2,0,1)
+
+                for gt_index, gt_dets_t_mask in enumerate(gt_dets_t_masks):
+                    y,x = np.where(gt_dets_t_mask)
+                    y_min, y_max, x_min, x_max = np.min(y), np.max(y), np.min(x), np.max(x)
+
+                    if y_max == height-1 or (dataset_type != 'moma' and (y_min == 0 or x_max == width-1 or x_min == 0)):
+                        edges_gt[gt_index] = True
+
+                tracker_dets_t_masks = mask_utils.decode(tracker_dets_t).transpose(2,0,1)
+
+                for tracker_index, tracker_dets_t_mask in enumerate(tracker_dets_t_masks):
+                    y,x = np.where(tracker_dets_t_mask)
+                    y_min, y_max, x_min, x_max = np.min(y), np.max(y), np.min(x), np.max(x)
+
+                    if y_max == height-1 or (dataset_type != 'moma' and (y_min == 0 or x_max == width-1 or x_min == 0)):
+                        edges_tracker[tracker_index] = True
+
+            edges_gt_list.append(edges_gt)
+            edges_tracker_list.append(edges_tracker)
+
         raw_data['similarity_scores'] = similarity_scores
+        raw_data['edges_gt'] = edges_gt_list
+        raw_data['edges_tracker'] = edges_tracker_list
+
         return raw_data
 
     @staticmethod
@@ -234,6 +270,9 @@ class _BaseDataset(ABC):
         if not is_encoded:
             masks1 = mask_utils.encode(np.array(np.transpose(masks1, (1, 2, 0)), order='F'))
             masks2 = mask_utils.encode(np.array(np.transpose(masks2, (1, 2, 0)), order='F'))
+
+        if len(masks1) > 0 and len(masks2) > 0 and masks2[0]['size'][0] > 0:
+            assert masks1[0]['size'][0] == masks2[0]['size'][0] and masks1[0]['size'][1] == masks2[0]['size'][1], f"Masks need to be the same size.\nMask 1 is shape: {masks1[0]['size']}\nMask 2 is shape: {masks2[0]['size']}"
 
         # use pycocotools for iou computation of rle encoded masks
         ious = mask_utils.iou(masks1, masks2, [do_ioa]*len(masks2))

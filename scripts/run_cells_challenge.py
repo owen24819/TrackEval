@@ -40,14 +40,29 @@ Command Line Arguments: Defaults, # Comments
 import sys
 import os
 import argparse
+from pathlib import Path
 from multiprocessing import freeze_support
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import trackeval  # noqa: E402
+import time
+from trackeval.utils import convert_CTC_to_MOTS
 
-res_path = '/projectnb/dunlop/ooconnor/object_detection/cell-trackformer/results/230512_moma_minimal_track_dn_enc_dn_track_dn_object_dab_mask/test/HOTA'
-res_path = '/projectnb/dunlop/ooconnor/object_detection/delta/results/test/HOTA'
-# res_path = '/projectnb/dunlop/ooconnor/object_detection/embedtrack/results/test/HOTA'
+dataset = 'DynamicNuclearNet-tracking-v1_0' # ['moma',''DynamicNuclearNet-tracking-v1_0']
+model = 'delta' # ['cell-trackformer','embedtrack','delta']
+
+gt_path = Path('/projectnb/dunlop/ooconnor/MOT/data') / dataset / 'CTC' / 'test-HOTA'
+res_path = Path('/projectnb/dunlop/ooconnor/MOT/models') / model / 'results' / dataset / 'test' / 'HOTA'
+
+if not res_path.exists():
+    convert_CTC_to_MOTS(hotapath = res_path, ctcpath = (res_path.parent / 'CTC'))
+
+if not gt_path.exists():
+    convert_CTC_to_MOTS(hotapath = gt_path, ctcpath = (gt_path.parents[1] / 'CTC' / 'test'))
+
+flex_div = True
+count_edges = True
+start_time = time.time()
 
 if __name__ == '__main__':
     freeze_support()
@@ -55,7 +70,7 @@ if __name__ == '__main__':
     # Command line interface:
     default_eval_config = trackeval.Evaluator.get_default_eval_config()
     default_eval_config['DISPLAY_LESS_PROGRESS'] = False
-    default_dataset_config = trackeval.datasets.CellsChallenge.get_default_dataset_config(res_path)
+    default_dataset_config = trackeval.datasets.CellsChallenge.get_default_dataset_config(res_path,gt_path)
     default_metrics_config = {'METRICS': ['HOTA', 'CLEAR', 'Identity']}
     config = {**default_eval_config, **default_dataset_config, **default_metrics_config}  # Merge default configs
     parser = argparse.ArgumentParser()
@@ -89,12 +104,16 @@ if __name__ == '__main__':
 
     # Run code
     evaluator = trackeval.Evaluator(eval_config)
-    dataset_list = [trackeval.datasets.CellsChallenge(res_path,dataset_config)]
+    dataset_list = [trackeval.datasets.CellsChallenge(res_path,gt_path,dataset_config)]
     metrics_list = []
-    for metric in [trackeval.metrics.HOTA, trackeval.metrics.CLEAR, trackeval.metrics.Identity, trackeval.metrics.VACE,
-                   trackeval.metrics.JAndF]:
+    for metric in [trackeval.metrics.HOTA]:
         if metric.get_name() in metrics_config['METRICS']:
-            metrics_list.append(metric())
+            metrics_list.append(metric(flex_div))
     if len(metrics_list) == 0:
         raise Exception('No metrics selected for evaluation')
-    evaluator.evaluate(dataset_list, metrics_list)
+    evaluator.evaluate(dataset_list, metrics_list, flex_div, dataset, count_edges)
+
+end_time = time.time()
+diff = end_time - start_time
+
+print(f'It took {round(diff,3)} seconds')

@@ -3,6 +3,7 @@ import traceback
 from multiprocessing.pool import Pool
 from functools import partial
 import os
+import pickle
 from . import utils
 from .utils import TrackEvalException
 from . import _timing
@@ -39,6 +40,7 @@ class Evaluator:
             'OUTPUT_EMPTY_CLASSES': True,  # If False, summary files are not output for classes with no detections
             'OUTPUT_DETAILED': True,
             'PLOT_CURVES': True,
+            'SAVE_ALL': True,
         }
         return default_config
 
@@ -52,7 +54,7 @@ class Evaluator:
                 _timing.DISPLAY_LESS_PROGRESS = True
 
     @_timing.time
-    def evaluate(self, dataset_list, metrics_list, show_progressbar=False):
+    def evaluate(self, dataset_list, metrics_list, flex_div, dataset_type, count_edges, show_progressbar=False):
         """Evaluate a set of metrics on a set of datasets"""
         config = self.config
         metrics_list = metrics_list + [Count()]  # Count metrics are always run
@@ -106,12 +108,10 @@ class Evaluator:
                         if show_progressbar and TQDM_IMPORTED:
                             seq_list_sorted = sorted(seq_list)
                             for curr_seq in tqdm.tqdm(seq_list_sorted):
-                                res[curr_seq] = eval_sequence(curr_seq, dataset, tracker, class_list, metrics_list,
-                                                              metric_names)
+                                res[curr_seq] = eval_sequence(curr_seq, dataset, tracker, class_list, metrics_list, metric_names, dataset_type, count_edges)
                         else:
                             for curr_seq in sorted(seq_list):
-                                res[curr_seq] = eval_sequence(curr_seq, dataset, tracker, class_list, metrics_list,
-                                                              metric_names)
+                                res[curr_seq] = eval_sequence(curr_seq, dataset, tracker, class_list, metrics_list, metric_names, dataset_type, count_edges)
 
                     # Combine results over all sequences and then over all classes
 
@@ -177,12 +177,23 @@ class Evaluator:
                                 if config['OUTPUT_DETAILED']:
                                     details.append(metric.detailed_results(table_res))
                                 if config['PLOT_CURVES']:
-                                    metric.plot_single_tracker_results(table_res, tracker_display_name, c_cls,
-                                                                       output_fol)
+                                    metric.plot_single_tracker_results(table_res, tracker_display_name, c_cls,output_fol)
                             if config['OUTPUT_SUMMARY']:
-                                utils.write_summary_results(summaries, c_cls, output_fol)
+                                utils.write_summary_results(summaries, c_cls, output_fol, flex_div, count_edges)
                             if config['OUTPUT_DETAILED']:
-                                utils.write_detailed_results(details, c_cls, output_fol)
+                                utils.write_detailed_results(details, c_cls, output_fol, flex_div, count_edges)
+                            if config['SAVE_ALL']:
+                                error_dict = {}
+                                for dataset_id in res.keys():
+                                    error_dict[dataset_id] = {}
+                                    for key in res[dataset_id][c_cls]['HOTA'].keys():
+                                        if 'ID' in key:
+                                            error_dict[dataset_id][key] = res[dataset_id][c_cls]['HOTA'][key]
+                                flex_div = '_flex_div' if flex_div else ''
+                                edges = '' if count_edges else '_no_edges'
+                                
+                                with open(output_fol + c_cls + '_data' + flex_div + edges + '.pkl', 'wb') as f:
+                                    pickle.dump(error_dict, f)
 
                     # Output for returning from function
                     output_res[dataset_name][tracker] = res
@@ -212,10 +223,10 @@ class Evaluator:
 
 
 @_timing.time
-def eval_sequence(seq, dataset, tracker, class_list, metrics_list, metric_names):
+def eval_sequence(seq, dataset, tracker, class_list, metrics_list, metric_names, dataset_type, count_edges):
     """Function for evaluating a single sequence"""
 
-    raw_data = dataset.get_raw_seq_data(tracker, seq)
+    raw_data = dataset.get_raw_seq_data(tracker, seq, dataset_type, count_edges)
     seq_res = {}
     for cls in class_list:
         seq_res[cls] = {}

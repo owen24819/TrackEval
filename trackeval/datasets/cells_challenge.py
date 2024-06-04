@@ -14,11 +14,11 @@ class CellsChallenge(_BaseDataset):
     """Dataset class for MOTS Challenge tracking"""
 
     @staticmethod
-    def get_default_dataset_config(res_path):
+    def get_default_dataset_config(res_path,gt_path):
         """Default class config values"""
         code_path = Path(utils.get_code_path())
         default_config = {
-            'GT_FOLDER': '/projectnb/dunlop/ooconnor/object_detection/data/moma/test/HOTA',  # Location of GT data
+            'GT_FOLDER': str(gt_path),  # Location of GT data
             'TRACKERS_FOLDER': res_path,  # Trackers location
             'OUTPUT_FOLDER': None,  # Where to save eval results (if None, same as TRACKERS_FOLDER)
             'TRACKERS_TO_EVAL': None,  # Filenames of trackers to eval (if None, all in folder)
@@ -36,11 +36,11 @@ class CellsChallenge(_BaseDataset):
         }
         return default_config
 
-    def __init__(self, res_path, config=None):
+    def __init__(self, res_path, gt_path, config=None):
         """Initialise dataset, checking that all required files are present"""
         super().__init__()
         # Fill non-given config values with defaults
-        self.config = utils.init_config(config, self.get_default_dataset_config(res_path), self.get_name())
+        self.config = utils.init_config(config, self.get_default_dataset_config(res_path,gt_path), self.get_name())
 
         self.benchmark = 'Cells'
         self.gt_set = self.benchmark + '-' + self.config['SPLIT_TO_EVAL']
@@ -98,7 +98,7 @@ class CellsChallenge(_BaseDataset):
 
         # Get trackers to eval
         if self.config['TRACKERS_TO_EVAL'] is None:
-            self.tracker_list = sorted(os.listdir(self.tracker_fol))
+            self.tracker_list = [res_path.parts[-5]]
         else:
             self.tracker_list = self.config['TRACKERS_TO_EVAL']
 
@@ -112,13 +112,13 @@ class CellsChallenge(_BaseDataset):
 
         for tracker in self.tracker_list:
             if self.data_is_zipped:
-                curr_file = os.path.join(self.tracker_fol, tracker, self.tracker_sub_fol + '.zip')
+                curr_file = os.path.join(self.tracker_fol, self.tracker_sub_fol + '.zip')
                 if not os.path.isfile(curr_file):
                     print('Tracker file not found: ' + curr_file)
-                    raise TrackEvalException('Tracker file not found: ' + tracker + '/' + os.path.basename(curr_file))
+                    raise TrackEvalException('Tracker file not found: ' + '/' + os.path.basename(curr_file))
             else:
                 for seq in self.seq_list:
-                    curr_file = os.path.join(self.tracker_fol, tracker, (seq + '.txt'))
+                    curr_file = os.path.join(self.tracker_fol, (seq + '.txt'))
                     if not os.path.isfile(curr_file):
                         print('Tracker file not found: ' + curr_file)
                         raise TrackEvalException(
@@ -192,14 +192,14 @@ class CellsChallenge(_BaseDataset):
             if is_gt:
                 zip_file = os.path.join(self.gt_fol, 'data.zip')
             else:
-                zip_file = os.path.join(self.tracker_fol, tracker, self.tracker_sub_fol + '.zip')
+                zip_file = os.path.join(self.tracker_fol, self.tracker_sub_fol + '.zip')
             file = seq + '.txt'
         else:
             zip_file = None
             if is_gt:
                 file = self.config["GT_LOC_FORMAT"].format(gt_folder=self.gt_fol, seq=seq)
             else:
-                file = os.path.join(self.tracker_fol, tracker, (seq + '.txt'))
+                file = os.path.join(self.tracker_fol, (seq + '.txt'))
 
         # Ignore regions
         if is_gt:
@@ -214,7 +214,7 @@ class CellsChallenge(_BaseDataset):
 
         # Convert data to required format
         num_timesteps = self.seq_lengths[seq]
-        data_keys = ['ids', 'classes', 'dets']
+        data_keys = ['ids', 'classes', 'dets', 'parent']
         if is_gt:
             data_keys += ['gt_ignore_region']
         raw_data = {key: [None] * num_timesteps for key in data_keys}
@@ -242,6 +242,9 @@ class CellsChallenge(_BaseDataset):
                                            for region in read_data[time_key]]
                     raw_data['ids'][t] = np.atleast_1d([region[1] for region in read_data[time_key]]).astype(int)
                     raw_data['classes'][t] = np.atleast_1d([region[2] for region in read_data[time_key]]).astype(int)
+                    raw_data['parent'][t] = np.atleast_1d([region[6] for region in read_data[time_key]]).astype(int)
+                    raw_data['parent'][t][raw_data['parent'][t] == 0] = -1
+                    
                     all_masks += raw_data['dets'][t]
                 except IndexError:
                     self._raise_index_error(is_gt, tracker, seq)
@@ -251,6 +254,7 @@ class CellsChallenge(_BaseDataset):
                 raw_data['dets'][t] = []
                 raw_data['ids'][t] = np.empty(0).astype(int)
                 raw_data['classes'][t] = np.empty(0).astype(int)
+                raw_data['parent'][t] = np.empty(0).astype(int)
             if is_gt:
                 if time_key in ignore_data.keys():
                     try:
@@ -280,11 +284,14 @@ class CellsChallenge(_BaseDataset):
         if is_gt:
             key_map = {'ids': 'gt_ids',
                        'classes': 'gt_classes',
-                       'dets': 'gt_dets'}
+                       'dets': 'gt_dets',
+                       'parent': 'gt_parent'}
         else:
             key_map = {'ids': 'tracker_ids',
                        'classes': 'tracker_classes',
-                       'dets': 'tracker_dets'}
+                       'dets': 'tracker_dets',
+                       'parent': 'tracker_parent'}
+
         for k, v in key_map.items():
             raw_data[v] = raw_data.pop(k)
         raw_data['num_timesteps'] = num_timesteps
@@ -329,26 +336,31 @@ class CellsChallenge(_BaseDataset):
 
         cls_id = int(self.class_name_to_class_id[cls])
 
-        data_keys = ['gt_ids', 'tracker_ids', 'gt_dets', 'tracker_dets', 'similarity_scores']
+        data_keys = ['gt_ids', 'tracker_ids', 'gt_dets', 'tracker_dets', 'gt_parent', 'tracker_parent', 'similarity_scores','edges_gt','edges_tracker']
         data = {key: [None] * raw_data['num_timesteps'] for key in data_keys}
         unique_gt_ids = []
         unique_tracker_ids = []
         num_gt_dets = 0
         num_tracker_dets = 0
+
         for t in range(raw_data['num_timesteps']):
 
             # Only extract relevant dets for this class for preproc and eval (cls)
             gt_class_mask = np.atleast_1d(raw_data['gt_classes'][t] == cls_id)
-            gt_class_mask = gt_class_mask.astype(np.bool)
+            gt_class_mask = gt_class_mask.astype(bool)
             gt_ids = raw_data['gt_ids'][t][gt_class_mask]
+            gt_parent = raw_data['gt_parent'][t][gt_class_mask]
             gt_dets = [raw_data['gt_dets'][t][ind] for ind in range(len(gt_class_mask)) if gt_class_mask[ind]]
 
             tracker_class_mask = np.atleast_1d(raw_data['tracker_classes'][t] == cls_id)
-            tracker_class_mask = tracker_class_mask.astype(np.bool)
+            tracker_class_mask = tracker_class_mask.astype(bool)
             tracker_ids = raw_data['tracker_ids'][t][tracker_class_mask]
+            tracker_parent = raw_data['tracker_parent'][t][tracker_class_mask]
             tracker_dets = [raw_data['tracker_dets'][t][ind] for ind in range(len(tracker_class_mask)) if
                             tracker_class_mask[ind]]
             similarity_scores = raw_data['similarity_scores'][t][gt_class_mask, :][:, tracker_class_mask]
+            edges_gt = raw_data['edges_gt'][t][gt_class_mask]
+            edges_tracker = raw_data['edges_tracker'][t][tracker_class_mask]
 
             # Match tracker and gt dets (with hungarian algorithm)
             unmatched_indices = np.arange(tracker_ids.shape[0])
@@ -372,33 +384,21 @@ class CellsChallenge(_BaseDataset):
             to_remove_tracker = unmatched_indices[is_within_ignore_region]
             data['tracker_ids'][t] = np.delete(tracker_ids, to_remove_tracker, axis=0)
             data['tracker_dets'][t] = np.delete(tracker_dets, to_remove_tracker, axis=0)
+            data['tracker_parent'][t] = np.delete(tracker_parent, to_remove_tracker, axis=0)
             similarity_scores = np.delete(similarity_scores, to_remove_tracker, axis=1)
 
             # Keep all ground truth detections
             data['gt_ids'][t] = gt_ids
             data['gt_dets'][t] = gt_dets
+            data['gt_parent'][t] = gt_parent
             data['similarity_scores'][t] = similarity_scores
+            data['edges_gt'][t] = edges_gt
+            data['edges_tracker'][t] = edges_tracker
 
-            unique_gt_ids += list(np.unique(data['gt_ids'][t]))
-            unique_tracker_ids += list(np.unique(data['tracker_ids'][t]))
+            unique_gt_ids = np.unique(np.append(data['gt_ids'][t], unique_gt_ids))
+            unique_tracker_ids = np.unique(np.append(data['tracker_ids'][t], unique_tracker_ids))
             num_tracker_dets += len(data['tracker_ids'][t])
             num_gt_dets += len(data['gt_ids'][t])
-
-        # Re-label IDs such that there are no empty IDs
-        if len(unique_gt_ids) > 0:
-            unique_gt_ids = np.unique(unique_gt_ids)
-            gt_id_map = np.nan * np.ones((np.max(unique_gt_ids) + 1))
-            gt_id_map[unique_gt_ids] = np.arange(len(unique_gt_ids))
-            for t in range(raw_data['num_timesteps']):
-                if len(data['gt_ids'][t]) > 0:
-                    data['gt_ids'][t] = gt_id_map[data['gt_ids'][t]].astype(np.int)
-        if len(unique_tracker_ids) > 0:
-            unique_tracker_ids = np.unique(unique_tracker_ids)
-            tracker_id_map = np.nan * np.ones((np.max(unique_tracker_ids) + 1))
-            tracker_id_map[unique_tracker_ids] = np.arange(len(unique_tracker_ids))
-            for t in range(raw_data['num_timesteps']):
-                if len(data['tracker_ids'][t]) > 0:
-                    data['tracker_ids'][t] = tracker_id_map[data['tracker_ids'][t]].astype(np.int)
 
         # Record overview statistics.
         data['num_tracker_dets'] = num_tracker_dets
