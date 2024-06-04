@@ -14,9 +14,9 @@ You need to set 4 variables to run it properly:
  
   	model: the name of the model whose results you are testing
    
-   	gt_path: the path to the ground truths
-    
-    	res_path: the path to the model results
+   	gt_path: the path to the ground truth
+
+	res_path: the path to the model results
      
 See each script for instructions and arguments.
 
