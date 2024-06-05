@@ -10,13 +10,19 @@ Author of Cell-HOTA is Owen O'Connor (link to paper)
 
 You need to set 4 variables to run it properly:
 
-	dataset: the name of the dateset you are testing
+	dataset: str - the name of the dateset you are testing
  
-  	model: the name of the model whose results you are testing
+  	model: str - the name of the model whose results you are testing
    
-   	gt_path: the path to the ground truth
+   	gt_path: Pathlib path - the path to the ground truth
 
-	res_path: the path to the model results
+	res_path: Pathlib path - the path to the model results
+
+ There are 2 optional varialbes:
+
+  	flex_div: bool (default: True) - determines whether Cell-HOTA allows flexible divisions
+   
+   	count_edges: bool (default: False) - determines whether Cell-HOTA uses cells touching the edge of the images towards the score
      
 See each script for instructions and arguments.
 
