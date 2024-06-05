@@ -22,7 +22,7 @@ You need to set 4 variables to run it properly:
 
   	flex_div: bool (default: True) - determines whether Cell-HOTA allows flexible divisions
    
-   	count_edges: bool (default: False) - determines whether Cell-HOTA uses cells touching the edge of the images towards the score
+   	count_edges: bool (default: True) - determines whether Cell-HOTA uses cells touching the edge of the images towards the score
      
 See each script for instructions and arguments.
 
